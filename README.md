@@ -1,11 +1,16 @@
-# PDF Print Problem Fixer
+# PDF Problem Solver Toolkit
 
-**Primary solution for fixing PDF files that display garbled text, symbols, or missing content when printing.**
+**Comprehensive toolkit for fixing PDF printing problems and managing academic documents.**
 
-This is the main tool for solving the most common PDF printing issue - font encoding problems. For other PDF issues (compression, security, corruption, etc.), see the `additional-tools/` directory.
+The primary solution for fixing PDF files that display garbled text, symbols, or missing content when printing, now available in multiple formats:
+
+- **🖥️ Command Line** - Interactive and batch processing tools
+- **🌐 Web Applications** - Browser-based interfaces for easy use
+- **📄 Professional Tools** - Academic document generation and management
 
 ## Quick Start
 
+### 🖥️ Command Line (Traditional)
 ```bash
 # Make executable (first time only)
 chmod +x fix-pdf-fonts-interactive.sh
@@ -15,9 +20,24 @@ chmod +x fix-pdf-fonts-interactive.sh
 
 # Or process a specific file directly
 ./fix-pdf-fonts-interactive.sh "My Document.pdf"
+```
 
-# View help
-./fix-pdf-fonts-interactive.sh --help
+### 🌐 Web Applications
+
+#### Flask Web App (Python)
+```bash
+cd web-app
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python app.py
+# Open http://localhost:5000
+```
+
+#### PHP Web App (Shared Hosting Friendly)
+```bash
+# Copy php-app folder to web server
+# Access via browser: http://yourserver/php-app/
 ```
 
 ## What It Fixes
@@ -58,12 +78,11 @@ This script solves common PDF printing problems:
 - Command-line mode for power users
 - Batch processing support
 
-## File Structure
+## Project Structure
 
 ```
-print-problem/
+pdf-problem-solver/
 ├── fix-pdf-fonts-interactive.sh        # 🎯 MAIN TOOL - Interactive font problem fixer
-├── fix-pdf-fonts.sh                    # Basic command-line version
 ├── additional-tools/                    # 🔧 Other PDF tools
 │   ├── analyze-pdf.sh                  #   📊 Analyze PDFs for problems  
 │   ├── compress-pdf.sh                 #   📦 Reduce file size
@@ -74,7 +93,17 @@ print-problem/
 │   ├── ocr-and-index.sh                #   🔍 OCR processing & HTML indexing
 │   ├── add-page-numbers.sh             #   📄 Add page numbers to PDFs
 │   └── README.md                       #   📚 Additional tools documentation
-├── LaTeX & Professional Tools/          # 📄 Course packet generation
+├── web-app/                             # 🌐 Flask web application
+│   ├── app.py                          #   Python backend server
+│   ├── requirements.txt                #   Python dependencies
+│   ├── templates/                      #   HTML templates
+│   │   └── index.html                  #   Web interface
+│   └── README.md                       #   Web app setup guide
+├── php-app/                             # 🐘 PHP web application
+│   ├── index.php                       #   All-in-one PHP application
+│   ├── .htaccess                       #   Apache configuration
+│   └── README.md                       #   PHP app setup guide
+├── LaTeX Tools/                         # 📄 Course packet generation
 │   ├── create-final-pdf.sh             #   Professional PDF course packets
 │   ├── generate-professional-pdfs.sh   #   Batch generation with covers  
 │   ├── create-template-cover-sheet.sh  #   Interactive cover sheet creator
@@ -85,20 +114,27 @@ print-problem/
 │   ├── WILLIAMS COLLEGE LOGO FOR WEB USE/
 │   └── williams-logo.png               # Quick reference logo
 ├── Documentation/                       # 📚 Comprehensive guides
-│   ├── README.md                        # This file (main tool docs)
+│   ├── README.md                        # This file (main project overview)
 │   ├── COMPLETE-TOOLKIT-README.md       # Full feature documentation
 │   ├── SOLUTION-SUMMARY.md             # Technical solutions guide
 │   ├── TOOLKIT-SUMMARY.md              # Quick tool reference
-│   └── CLAUDE.md                        # Project configuration
+│   └── additional-tools/README.md       # Extended tools guide
 └── generated-covers/                    # 📑 Generated cover sheets
     └── Cover_Sheet_*.pdf                # Course-specific covers
 ```
 
 ## 🎯 **Start Here for Print Problems**
-If your PDF shows **symbols instead of text** when printing, use:
+
+### Command Line
+If your PDF shows **symbols instead of text** when printing:
 ```bash
 ./fix-pdf-fonts-interactive.sh
 ```
+
+### Web Interface
+For a user-friendly browser interface:
+- **Flask App**: `cd web-app && python app.py` → http://localhost:5000
+- **PHP App**: Upload to web server → http://yourserver/php-app/
 
 ## 🔧 **Other PDF Issues**
 For file size, security, corruption, or other problems:
@@ -110,9 +146,9 @@ cd additional-tools
 ## 📄 **Professional Course Packets**
 For creating professional academic course packets with covers:
 ```bash
+cd "LaTeX Tools"
 ./create-final-pdf.sh input.pdf       # Single PDF with professional cover
 ./generate-professional-pdfs.sh       # Batch process from CSV data
-./create-template-cover-sheet.sh      # Interactive cover creator
 ```
 
 ## Example Session

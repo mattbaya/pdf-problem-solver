@@ -14,6 +14,11 @@ Comprehensive PDF processing toolkit focused on fixing printing problems and enh
 - High-resolution page conversion (300 DPI) for print quality
 - Smart problem detection and user-friendly interfaces
 
+### Web Applications
+- **Flask Web App** - Python-based web interface requiring dedicated server
+- **PHP Web App** - Lightweight web interface for shared hosting environments
+- Both support drag-and-drop upload and automatic PDF processing
+
 ### Additional Tools
 - OCR processing with intelligent title extraction
 - Professional cover sheet generation
@@ -47,7 +52,7 @@ Comprehensive PDF processing toolkit focused on fixing printing problems and enh
 ## Project Structure
 
 ```
-print-problem/
+pdf-problem-solver/
 ├── fix-pdf-fonts-interactive.sh        # 🎯 PRIMARY TOOL
 ├── additional-tools/                    # 🔧 Extended functionality
 │   ├── ocr-and-index.sh                # OCR processing & indexing
@@ -59,6 +64,16 @@ print-problem/
 │   ├── optimize-pdf.sh                 # Web optimization
 │   ├── pdf-repair-toolkit.sh           # Comprehensive repair toolkit
 │   └── add-page-numbers.sh             # Page numbering utility
+├── web-app/                             # 🌐 Flask web application
+│   ├── app.py                          # Flask backend server
+│   ├── requirements.txt                # Python dependencies
+│   ├── templates/                      # HTML templates
+│   │   └── index.html                  # Web interface
+│   └── README.md                       # Web app documentation
+├── php-app/                             # 🐘 PHP web application
+│   ├── index.php                       # All-in-one PHP application
+│   ├── .htaccess                       # Apache configuration
+│   └── README.md                       # PHP app documentation
 ├── LaTeX Tools/                         # 📄 Professional document generation
 │   ├── create-final-pdf.sh             # Professional PDF course packets
 │   ├── generate-professional-pdfs.sh   # Batch PDF generation with covers
@@ -109,6 +124,10 @@ shellcheck *.sh additional-tools/*.sh
 # Test PDF processing
 ./fix-pdf-fonts-interactive.sh --help
 ./additional-tools/analyze-pdf.sh test-document.pdf
+
+# Web application validation
+cd web-app && python -m py_compile app.py
+cd php-app && php -l index.php
 
 # Dependency verification
 brew doctor
