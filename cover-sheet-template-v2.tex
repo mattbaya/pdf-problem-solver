@@ -1,0 +1,66 @@
+\documentclass[12pt]{article}
+\usepackage[letterpaper,margin=0.5in]{geometry}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{fontspec}
+\usepackage{graphicx}
+\setmainfont{Times New Roman}
+\setsansfont{Arial}
+
+% Williams College colors
+\definecolor{williamsblue}{RGB}{51,102,153}
+\definecolor{williamspurple}{RGB}{102,45,145}
+\definecolor{accentgray}{RGB}{128,128,128}
+
+\pagestyle{empty}
+
+\begin{document}
+
+% Clean, professional layout with proper spacing
+\begin{center}
+
+% Logo at top - prominent but not overwhelming
+\vspace{0.75in}
+\includegraphics[height=1.3in]{williams-logo.png}
+
+\vspace{0.6in}
+
+% Clear course identification
+{\color{williamspurple} \fontsize{16}{20}\selectfont \textbf{COURSE PACKET}}
+
+\vspace{0.4in}
+
+% Course title - the main focus
+{\color{williamsblue} \fontsize{26}{32}\selectfont \textbf{<Course-Title>}}
+
+\vspace{0.6in}
+
+% Course details in clean, separated sections
+{\fontsize{20}{24}\selectfont \textbf{<Course-Number>}}
+
+\vspace{0.5in}
+
+% Professor information
+{\fontsize{16}{20}\selectfont Professor \textbf{<Professor-Name>}}
+
+\vspace{0.3in}
+
+% Department
+{\color{williamspurple} \fontsize{14}{18}\selectfont <Department> Department}
+
+\vspace{0.25in}
+
+% Term
+{\color{accentgray} \fontsize{14}{18}\selectfont <Term>}
+
+\vfill
+
+% Simple generated date
+{\color{accentgray} \fontsize{9}{11}\selectfont 
+Generated \today}
+
+\vspace{0.5in}
+
+\end{center}
+
+\end{document}
