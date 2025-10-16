@@ -24,7 +24,29 @@ chmod +x fix-pdf-fonts-interactive.sh
 
 ### 🌐 Web Applications
 
-#### Flask Web App (Python)
+#### PHP Web App (Recommended - Production Ready)
+**Best for:** Shared hosting, VPS, dedicated servers. No background process needed!
+
+```bash
+# Copy php-app folder to web server
+# Access via browser: http://yourserver/php-app/
+
+# See php-app/DEPLOYMENT.md for detailed setup instructions
+```
+
+**Features:**
+- ✅ Professional cover sheet generation with logo upload
+- ✅ Auto-generated table of contents with headline detection
+- ✅ Configurable DPI (300/600/1200)
+- ✅ OCR processing
+- ✅ Page numbering
+- ✅ PDF compression
+- ✅ Security removal
+- ✅ All processing on-demand (no daemon required)
+
+#### Flask Web App (Python - Alternative)
+**Best for:** Development, custom deployments requiring async processing.
+
 ```bash
 cd web-app
 python3 -m venv venv
@@ -34,11 +56,7 @@ python app.py
 # Open http://localhost:5000
 ```
 
-#### PHP Web App (Shared Hosting Friendly)
-```bash
-# Copy php-app folder to web server
-# Access via browser: http://yourserver/php-app/
-```
+**Note:** Flask version requires a continuously running process. See web-app/DEPLOYMENT.md for details.
 
 ## What It Fixes
 
@@ -84,7 +102,7 @@ This script solves common PDF printing problems:
 pdf-problem-solver/
 ├── fix-pdf-fonts-interactive.sh        # 🎯 MAIN TOOL - Interactive font problem fixer
 ├── additional-tools/                    # 🔧 Other PDF tools
-│   ├── analyze-pdf.sh                  #   📊 Analyze PDFs for problems  
+│   ├── analyze-pdf.sh                  #   📊 Analyze PDFs for problems
 │   ├── compress-pdf.sh                 #   📦 Reduce file size
 │   ├── unlock-pdf.sh                   #   🔓 Remove passwords/restrictions
 │   ├── repair-pdf.sh                   #   🛠️  Fix corrupted PDFs
@@ -92,6 +110,8 @@ pdf-problem-solver/
 │   ├── pdf-repair-toolkit.sh           #   🎛️  Interactive toolkit for all tools
 │   ├── ocr-and-index.sh                #   🔍 OCR processing & HTML indexing
 │   ├── add-page-numbers.sh             #   📄 Add page numbers to PDFs
+│   ├── generate-toc.sh                 #   📋 Generate table of contents (NEW!)
+│   ├── generate-cover-sheet.sh         #   📄 Create professional cover sheets (NEW!)
 │   └── README.md                       #   📚 Additional tools documentation
 ├── web-app/                             # 🌐 Flask web application
 │   ├── app.py                          #   Python backend server

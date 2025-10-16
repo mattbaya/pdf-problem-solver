@@ -4,11 +4,87 @@
 
 The PHP application is designed for shared hosting environments and doesn't require a dedicated server process. It works with any web server that supports PHP (Apache, Nginx, etc.).
 
+### Features
+
+- **Font Problem Fixing** - Fixes PDFs where symbols appear instead of text
+- **Configurable DPI** - 300/600/1200 for print quality control
+- **Page Selection** - Convert all pages, auto-detect problems, or specify custom pages
+- **OCR Processing** - Extract text from scanned documents
+- **Page Numbering** - Add page numbers to documents
+- **PDF Compression** - Reduce file size while maintaining quality
+- **Security Removal** - Remove passwords and restrictions
+- **Table of Contents** - Auto-generate TOC with intelligent headline detection
+- **Professional Cover Sheets** - Customizable covers with logo upload support
+
 ## Requirements
 
-- PHP 7.4 or higher
-- Shell access (for executing bash scripts)
-- System tools: pdftk, poppler-utils, imagemagick, ghostscript, qpdf, tesseract
+### PHP Requirements
+- **PHP 7.4 or higher** (PHP 8.0+ recommended)
+- **Required PHP Extensions:**
+  - `fileinfo` - For MIME type detection
+  - `mbstring` - For string handling
+  - `curl` - For external requests (optional)
+- **Required PHP Functions:**
+  - `exec()` - MUST be enabled (for running bash scripts)
+  - `shell_exec()` - Recommended
+  - **IMPORTANT:** These functions are often disabled for security. You MUST enable them in `php.ini`:
+    ```ini
+    ; Remove exec from disable_functions
+    ; Before: disable_functions = exec,passthru,shell_exec,system...
+    ; After:  disable_functions = parse_ini_file,show_source
+    ```
+
+### System Requirements
+- **Shell access** - For executing bash scripts via `shell_exec()` or `exec()`
+- **PDF Processing Tools:**
+  - `pdftk` or `pdftk-java` - PDF manipulation and assembly
+  - `poppler-utils` - Includes pdfinfo, pdftotext, pdftoppm
+  - `imagemagick` - Image processing (convert, magick commands)
+  - `ghostscript` - PDF compression and processing
+  - `qpdf` - PDF optimization and repair
+- **OCR Tools (optional but recommended):**
+  - `tesseract-ocr` - For OCR processing
+  - `tesseract-lang` - Language packs
+- **LaTeX Tools (for TOC and Cover Sheet generation):**
+  - `texlive` or `mactex` - LaTeX distribution with pdflatex
+  - On RHEL/CentOS/Fedora: `sudo dnf install texlive-scheme-medium`
+  - On Ubuntu/Debian: `sudo apt-get install texlive-latex-base texlive-fonts-recommended texlive-xetex`
+  - On macOS: `brew install --cask mactex`
+
+### Installation Example (RHEL/CentOS/Fedora)
+
+```bash
+# Install PHP and required extensions
+sudo dnf install php php-fpm php-mbstring php-fileinfo
+
+# Install PDF processing tools
+sudo dnf install pdftk poppler-utils ImageMagick ghostscript qpdf
+
+# Install OCR tools
+sudo dnf install tesseract tesseract-langpack-eng
+
+# Install LaTeX (for TOC and cover sheets)
+sudo dnf install texlive-scheme-medium
+
+# Install fontconfig for LaTeX fonts
+sudo dnf install fontconfig texlive-collection-fontsrecommended
+```
+
+### Installation Example (Ubuntu/Debian)
+
+```bash
+# Install PHP and required extensions
+sudo apt-get install php php-fpm php-mbstring php-fileinfo
+
+# Install PDF processing tools
+sudo apt-get install pdftk poppler-utils imagemagick ghostscript qpdf
+
+# Install OCR tools
+sudo apt-get install tesseract-ocr tesseract-ocr-eng
+
+# Install LaTeX (for TOC and cover sheets)
+sudo apt-get install texlive-latex-base texlive-fonts-recommended texlive-xetex
+```
 
 ## Configuration
 
@@ -29,31 +105,25 @@ memory_limit = 512M
 
 #### Using .htaccess (Shared Hosting)
 
-The included `.htaccess` file handles most configuration:
+The included `.htaccess` file provides security and routing configuration. PHP settings must be configured in `php.ini` or via PHP-FPM pool configuration (not in `.htaccess` when using PHP-FPM).
+
+**Note:** The `php_value` directives do NOT work with PHP-FPM. You must configure PHP settings in `/etc/php.ini` or PHP-FPM pool configuration.
+
+#### Virtual Host Configuration (Apache + PHP-FPM)
+
+For dedicated servers or VPS with PHP-FPM:
 
 ```apache
-# Increase upload limits
-php_value upload_max_filesize 100M
-php_value post_max_size 100M
-php_value max_execution_time 300
-php_value memory_limit 512M
-
-# Security
-Options -Indexes
-RewriteEngine On
-
-# Redirect to HTTPS (optional)
-# RewriteCond %{HTTPS} off
-# RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
-```
-
-#### Virtual Host Configuration
-
-For dedicated servers or VPS:
-
-```apache
-<VirtualHost *:80>
+<VirtualHost *:443>
     ServerName your-domain.com
+    ServerAlias www.your-domain.com
+
+    # SSL Configuration (Let's Encrypt example)
+    SSLEngine on
+    SSLCertificateFile /etc/letsencrypt/live/your-domain.com/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/your-domain.com/privkey.pem
+
+    # Document root
     DocumentRoot /path/to/pdf-problem-solver/php-app
 
     <Directory /path/to/pdf-problem-solver/php-app>
@@ -61,18 +131,27 @@ For dedicated servers or VPS:
         AllowOverride All
         Require all granted
 
-        # PHP settings
-        php_value upload_max_filesize 100M
-        php_value post_max_size 100M
-        php_value max_execution_time 300
-        php_value memory_limit 512M
+        # PHP-FPM handler
+        <FilesMatch \.php$>
+            SetHandler "proxy:unix:/run/php-fpm/www.sock|fcgi://localhost"
+        </FilesMatch>
+
+        DirectoryIndex index.php
     </Directory>
+
+    # Allow large file uploads
+    LimitRequestBody 104857600
+
+    # Increase timeout for PDF processing
+    TimeOut 300
 
     # Error and access logs
     ErrorLog ${APACHE_LOG_DIR}/pdf-solver-error.log
     CustomLog ${APACHE_LOG_DIR}/pdf-solver-access.log combined
 </VirtualHost>
 ```
+
+**Important:** PHP settings (upload limits, timeouts) must be configured in `/etc/php.ini`, not in the Apache config when using PHP-FPM.
 
 ### Nginx Configuration
 
