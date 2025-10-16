@@ -91,11 +91,24 @@ function handle_upload() {
         echo json_encode(['error' => 'Failed to save file']);
         return;
     }
-    
+
+    // Handle logo upload if present
+    $logo_path = null;
+    if (isset($_FILES['cover_logo']) && $_FILES['cover_logo']['error'] === UPLOAD_ERR_OK) {
+        $logo = $_FILES['cover_logo'];
+        $logo_ext = strtolower(pathinfo($logo['name'], PATHINFO_EXTENSION));
+
+        if (in_array($logo_ext, ['png', 'jpg', 'jpeg', 'pdf'])) {
+            $logo_path = UPLOAD_DIR . $upload_id . '_logo.' . $logo_ext;
+            move_uploaded_file($logo['tmp_name'], $logo_path);
+        }
+    }
+
     echo json_encode([
         'success' => true,
         'upload_id' => $upload_id,
-        'filename' => $filename
+        'filename' => $filename,
+        'has_logo' => $logo_path !== null
     ]);
 }
 
@@ -117,6 +130,15 @@ function handle_process() {
     $add_page_numbers = ($_POST['page_numbers'] ?? '0') === '1';
     $compress = ($_POST['compress'] ?? '0') === '1';
     $remove_security = ($_POST['remove_security'] ?? '0') === '1';
+    $generate_toc = ($_POST['generate_toc'] ?? '0') === '1';
+    $generate_cover = ($_POST['generate_cover'] ?? '0') === '1';
+
+    // Get cover sheet details if requested
+    $cover_title = $_POST['cover_title'] ?? '';
+    $cover_author = $_POST['cover_author'] ?? '';
+    $cover_subtitle = $_POST['cover_subtitle'] ?? '';
+    $cover_date = $_POST['cover_date'] ?? '';
+    $cover_contact = $_POST['cover_contact'] ?? '';
 
     // Validate inputs
     if (!preg_match('/^pdf_[a-z0-9.]+$/i', $upload_id)) {
@@ -226,6 +248,30 @@ function handle_process() {
         }
     }
 
+    // Step 3b: Generate Table of Contents if requested
+    if ($generate_toc) {
+        $toc_script = dirname(SCRIPT_PATH) . '/additional-tools/generate-toc.sh';
+        if (file_exists($toc_script)) {
+            $toc_output = UPLOAD_DIR . $upload_id . '_TOC.pdf';
+            $command = escapeshellarg($toc_script) . ' ' . escapeshellarg($current_file) . ' --output ' . escapeshellarg($toc_output) . ' 2>&1';
+            exec($command, $output, $return_code);
+
+            // Check if TOC was generated
+            if (file_exists($toc_output)) {
+                // Prepend TOC to the document
+                $temp_combined = UPLOAD_DIR . $upload_id . '_temp_combined.pdf';
+                $pdftk_command = 'pdftk ' . escapeshellarg($toc_output) . ' ' . escapeshellarg($current_file) . ' cat output ' . escapeshellarg($temp_combined) . ' 2>&1';
+                exec($pdftk_command, $output, $return_code);
+
+                if (file_exists($temp_combined)) {
+                    unlink($current_file);
+                    $current_file = $temp_combined;
+                    // Keep standalone TOC file as well for download
+                }
+            }
+        }
+    }
+
     // Step 4: Add page numbers if requested
     if ($add_page_numbers) {
         $pagenums_script = dirname(SCRIPT_PATH) . '/additional-tools/add-page-numbers.sh';
@@ -258,6 +304,56 @@ function handle_process() {
         }
     }
 
+    // Step 6: Generate cover sheet if requested (must be last, gets prepended)
+    if ($generate_cover) {
+        $cover_script = dirname(SCRIPT_PATH) . '/additional-tools/generate-cover-sheet.sh';
+        if (file_exists($cover_script)) {
+            $cover_output = UPLOAD_DIR . $upload_id . '_COVER.pdf';
+
+            // Build command with all cover sheet options
+            $command = escapeshellarg($cover_script) . ' --output ' . escapeshellarg($cover_output);
+            $command .= ' --source-pdf ' . escapeshellarg($current_file);
+
+            if (!empty($cover_title)) {
+                $command .= ' --title ' . escapeshellarg($cover_title);
+            }
+            if (!empty($cover_author)) {
+                $command .= ' --author ' . escapeshellarg($cover_author);
+            }
+            if (!empty($cover_subtitle)) {
+                $command .= ' --subtitle ' . escapeshellarg($cover_subtitle);
+            }
+            if (!empty($cover_date)) {
+                $command .= ' --date ' . escapeshellarg($cover_date);
+            }
+            if (!empty($cover_contact)) {
+                $command .= ' --contact ' . escapeshellarg($cover_contact);
+            }
+
+            // Check for logo file
+            $logo_files = glob(UPLOAD_DIR . $upload_id . '_logo.*');
+            if (!empty($logo_files)) {
+                $command .= ' --logo ' . escapeshellarg($logo_files[0]);
+            }
+
+            $command .= ' 2>&1';
+            exec($command, $output, $return_code);
+
+            // Prepend cover to document
+            if (file_exists($cover_output)) {
+                $temp_combined = UPLOAD_DIR . $upload_id . '_temp_with_cover.pdf';
+                $pdftk_command = 'pdftk ' . escapeshellarg($cover_output) . ' ' . escapeshellarg($current_file) . ' cat output ' . escapeshellarg($temp_combined) . ' 2>&1';
+                exec($pdftk_command, $output, $return_code);
+
+                if (file_exists($temp_combined)) {
+                    unlink($current_file);
+                    $current_file = $temp_combined;
+                    // Keep standalone cover for download
+                }
+            }
+        }
+    }
+
     // Final output path
     $output_path = UPLOAD_DIR . $upload_id . '_output_' . $filename;
     rename($current_file, $output_path);
@@ -267,10 +363,22 @@ function handle_process() {
         unlink($input_path);
     }
 
-    echo json_encode([
+    $response = [
         'success' => true,
         'download_url' => '?download=1&file=' . urlencode($upload_id . '_output_' . $filename)
-    ]);
+    ];
+
+    // Add TOC file URL if it exists
+    if ($generate_toc && file_exists(UPLOAD_DIR . $upload_id . '_TOC.pdf')) {
+        $response['toc_url'] = '?download=1&file=' . urlencode($upload_id . '_TOC.pdf');
+    }
+
+    // Add cover file URL if it exists
+    if ($generate_cover && file_exists(UPLOAD_DIR . $upload_id . '_COVER.pdf')) {
+        $response['cover_url'] = '?download=1&file=' . urlencode($upload_id . '_COVER.pdf');
+    }
+
+    echo json_encode($response);
 }
 
 function handle_download() {
@@ -693,6 +801,60 @@ function handle_cleanup() {
                                 <small>Remove password protection or restrictions</small>
                             </div>
                         </label>
+
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="generate_toc" id="generateTocCheck" value="1">
+                            <div>
+                                <span>Generate Table of Contents</span>
+                                <small>Create a printable TOC page listing all headlines with page numbers</small>
+                            </div>
+                        </label>
+
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="generate_cover" id="generateCoverCheck" value="1">
+                            <div>
+                                <span>Generate Cover Sheet</span>
+                                <small>Create a professional cover page for your document</small>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Cover Sheet Options (hidden by default) -->
+                <div class="form-group" id="coverSheetOptions" style="display: none;">
+                    <label style="font-size: 1.1rem; margin-bottom: 1rem; display: block;">Cover Sheet Details:</label>
+
+                    <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 1rem;">
+                        <div style="margin-bottom: 1rem;">
+                            <label for="coverTitle">Title:</label>
+                            <input type="text" id="coverTitle" name="cover_title" placeholder="Will be auto-filled from PDF">
+                        </div>
+
+                        <div style="margin-bottom: 1rem;">
+                            <label for="coverAuthor">Author Name:</label>
+                            <input type="text" id="coverAuthor" name="cover_author" placeholder="e.g., Prof. Jane Smith">
+                        </div>
+
+                        <div style="margin-bottom: 1rem;">
+                            <label for="coverSubtitle">Subtitle (optional):</label>
+                            <input type="text" id="coverSubtitle" name="cover_subtitle" placeholder="e.g., Course Readings for Fall 2025">
+                        </div>
+
+                        <div style="margin-bottom: 1rem;">
+                            <label for="coverDate">Date:</label>
+                            <input type="text" id="coverDate" name="cover_date" placeholder="Will be auto-filled with current date">
+                        </div>
+
+                        <div style="margin-bottom: 1rem;">
+                            <label for="coverContact">Contact Information (optional):</label>
+                            <input type="text" id="coverContact" name="cover_contact" placeholder="e.g., jsmith@institution.edu">
+                        </div>
+
+                        <div style="margin-bottom: 0;">
+                            <label for="coverLogo">Logo (optional - PNG, JPG, or PDF):</label>
+                            <input type="file" id="coverLogo" name="cover_logo" accept=".png,.jpg,.jpeg,.pdf">
+                            <small style="display: block; margin-top: 0.5rem; color: #666;">Logo will appear in the top 1/4 of the cover page</small>
+                        </div>
                     </div>
                 </div>
 
@@ -757,6 +919,9 @@ function handle_cleanup() {
         const error = document.getElementById('error');
         const errorMessage = document.getElementById('errorMessage');
         const downloadBtn = document.getElementById('downloadBtn');
+        const generateCoverCheck = document.getElementById('generateCoverCheck');
+        const coverSheetOptions = document.getElementById('coverSheetOptions');
+        const coverTitle = document.getElementById('coverTitle');
 
         let currentUploadId = null;
 
@@ -768,6 +933,20 @@ function handle_cleanup() {
             } else {
                 customPagesGroup.style.display = 'none';
                 customPages.required = false;
+            }
+        });
+
+        // Show/hide cover sheet options
+        generateCoverCheck.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                coverSheetOptions.style.display = 'block';
+                // Auto-fill title from filename if available
+                if (fileInput.files.length > 0 && !coverTitle.value) {
+                    const filename = fileInput.files[0].name.replace('.pdf', '').replace(/_/g, ' ');
+                    coverTitle.placeholder = filename;
+                }
+            } else {
+                coverSheetOptions.style.display = 'none';
             }
         });
 
@@ -874,6 +1053,17 @@ function handle_cleanup() {
             formData.append('page_numbers', document.getElementById('pageNumbersCheck').checked ? '1' : '0');
             formData.append('compress', document.getElementById('compressCheck').checked ? '1' : '0');
             formData.append('remove_security', document.getElementById('removeSecurityCheck').checked ? '1' : '0');
+            formData.append('generate_toc', document.getElementById('generateTocCheck').checked ? '1' : '0');
+            formData.append('generate_cover', document.getElementById('generateCoverCheck').checked ? '1' : '0');
+
+            // Add cover sheet details if cover is requested
+            if (document.getElementById('generateCoverCheck').checked) {
+                formData.append('cover_title', document.getElementById('coverTitle').value);
+                formData.append('cover_author', document.getElementById('coverAuthor').value);
+                formData.append('cover_subtitle', document.getElementById('coverSubtitle').value);
+                formData.append('cover_date', document.getElementById('coverDate').value);
+                formData.append('cover_contact', document.getElementById('coverContact').value);
+            }
 
             fetch('index.php', {
                 method: 'POST',
@@ -882,9 +1072,9 @@ function handle_cleanup() {
             .then(response => response.json())
             .then(data => {
                 processing.style.display = 'none';
-                
+
                 if (data.success) {
-                    showSuccess(data.download_url);
+                    showSuccess(data.download_url, data.toc_url, data.cover_url);
                 } else {
                     showError(data.error || 'Processing failed', data.details);
                 }
@@ -895,7 +1085,7 @@ function handle_cleanup() {
             });
         }
         
-        function showSuccess(downloadUrl) {
+        function showSuccess(downloadUrl, tocUrl, coverUrl) {
             result.style.display = 'block';
             downloadBtn.href = downloadUrl;
             downloadBtn.onclick = () => {
@@ -905,7 +1095,7 @@ function handle_cleanup() {
                         const formData = new FormData();
                         formData.append('action', 'cleanup');
                         formData.append('upload_id', currentUploadId);
-                        
+
                         fetch('index.php', {
                             method: 'POST',
                             body: formData
@@ -913,6 +1103,48 @@ function handle_cleanup() {
                     }, 1000);
                 }
             };
+
+            // Clear any existing extra download links
+            const existingLinks = document.getElementById('extraDownloadLinks');
+            if (existingLinks) {
+                existingLinks.remove();
+            }
+
+            // Create container for extra downloads
+            if (tocUrl || coverUrl) {
+                const extraLinksContainer = document.createElement('div');
+                extraLinksContainer.id = 'extraDownloadLinks';
+                extraLinksContainer.style.marginTop = '20px';
+                extraLinksContainer.style.paddingTop = '20px';
+                extraLinksContainer.style.borderTop = '1px solid #ddd';
+
+                let linksHTML = '<p style="margin-bottom: 15px; font-weight: 600; color: #2c3e50;">Additional Files:</p>';
+
+                if (coverUrl) {
+                    linksHTML += `
+                        <div style="margin-bottom: 10px;">
+                            <a href="${coverUrl}" class="btn" style="background-color: #9b59b6;">
+                                📄 Download Cover Sheet (standalone)
+                            </a>
+                        </div>
+                    `;
+                }
+
+                if (tocUrl) {
+                    linksHTML += `
+                        <div style="margin-bottom: 10px;">
+                            <a href="${tocUrl}" class="btn" style="background-color: #27ae60;">
+                                📋 Download Table of Contents (standalone)
+                            </a>
+                        </div>
+                    `;
+                }
+
+                linksHTML += '<p style="margin-top: 15px; color: #666; font-size: 14px;">Note: Cover and TOC are already included in the main PDF above.</p>';
+
+                extraLinksContainer.innerHTML = linksHTML;
+                downloadBtn.parentNode.appendChild(extraLinksContainer);
+            }
         }
         
         function showError(message, details) {
