@@ -6,7 +6,7 @@
 define('MAX_FILE_SIZE', 100 * 1024 * 1024); // 100MB
 define('UPLOAD_DIR', sys_get_temp_dir() . '/pdf-fixer/');
 define('SCRIPT_PATH', dirname(__DIR__) . '/fix-pdf-fonts-interactive.sh');
-define('CLEANUP_AGE', 3600); // Clean files older than 1 hour
+define('CLEANUP_AGE', 86400); // Clean files older than 24 hours
 
 // Ensure upload directory exists
 if (!file_exists(UPLOAD_DIR)) {
@@ -104,42 +104,87 @@ function handle_process() {
         echo json_encode(['error' => 'Missing parameters']);
         return;
     }
-    
+
     $upload_id = $_POST['upload_id'];
     $filename = $_POST['filename'];
-    
+    $email = $_POST['email'] ?? '';
+    $pages_mode = $_POST['pages'] ?? 'all';
+    $custom_pages = $_POST['custom_pages'] ?? '';
+    $dpi = $_POST['dpi'] ?? '600';
+
+    // Get processing options
+    $do_ocr = ($_POST['ocr'] ?? '0') === '1';
+    $add_page_numbers = ($_POST['page_numbers'] ?? '0') === '1';
+    $compress = ($_POST['compress'] ?? '0') === '1';
+    $remove_security = ($_POST['remove_security'] ?? '0') === '1';
+
     // Validate inputs
     if (!preg_match('/^pdf_[a-z0-9.]+$/i', $upload_id)) {
         echo json_encode(['error' => 'Invalid upload ID']);
         return;
     }
-    
+
+    // Validate DPI
+    if (!in_array($dpi, ['300', '600', '1200'])) {
+        $dpi = '600';
+    }
+
     $input_path = UPLOAD_DIR . $upload_id . '_input_' . $filename;
-    $output_path = UPLOAD_DIR . $upload_id . '_output_' . $filename;
-    
+    $current_file = $input_path;
+
     if (!file_exists($input_path)) {
         echo json_encode(['error' => 'Input file not found']);
         return;
     }
-    
+
     // Check if script exists
     if (!file_exists(SCRIPT_PATH)) {
         echo json_encode(['error' => 'Processing script not found at: ' . SCRIPT_PATH]);
         return;
     }
-    
-    // Run the shell script
+
+    // Step 1: Remove security if requested (must be first)
+    if ($remove_security) {
+        $unlock_script = dirname(SCRIPT_PATH) . '/additional-tools/unlock-pdf.sh';
+        if (file_exists($unlock_script)) {
+            $command = escapeshellarg($unlock_script) . ' ' . escapeshellarg($current_file) . ' 2>&1';
+            exec($command, $output, $return_code);
+
+            // Look for unlocked file
+            $expected_unlocked = str_replace('.pdf', '-unlocked.pdf', $current_file);
+            if (file_exists($expected_unlocked)) {
+                if ($current_file !== $input_path) {
+                    unlink($current_file);
+                }
+                $current_file = $expected_unlocked;
+            }
+        }
+    }
+
+    // Step 2: Fix PDF fonts (main processing)
+    $command = escapeshellarg(SCRIPT_PATH) . ' ' . escapeshellarg($current_file);
+    $command .= ' --dpi ' . escapeshellarg($dpi);
+
+    // Add page selection
+    if ($pages_mode === 'custom' && !empty($custom_pages)) {
+        $pages = str_replace(',', ' ', $custom_pages);
+        $command .= ' --pages ' . escapeshellarg($pages);
+    } else {
+        $command .= ' --pages ' . escapeshellarg($pages_mode);
+    }
+
+    // Add auto-confirmation
+    $temp_output = UPLOAD_DIR . $upload_id . '_temp_fixed.pdf';
     $command = sprintf(
-        'echo "1" | %s %s %s 2>&1',
-        escapeshellarg(SCRIPT_PATH),
-        escapeshellarg($input_path),
-        escapeshellarg($output_path)
+        'echo -e "y\n%s\ny\n" | %s 2>&1',
+        escapeshellarg($temp_output),
+        $command
     );
-    
+
     $output = [];
     $return_code = 0;
     exec($command, $output, $return_code);
-    
+
     if ($return_code !== 0) {
         echo json_encode([
             'error' => 'PDF processing failed',
@@ -147,12 +192,81 @@ function handle_process() {
         ]);
         return;
     }
-    
-    if (!file_exists($output_path)) {
+
+    // Find the fixed output
+    $auto_output = str_replace('.pdf', '-FIXED.pdf', $current_file);
+    if (file_exists($auto_output)) {
+        if ($current_file !== $input_path) {
+            unlink($current_file);
+        }
+        $current_file = $auto_output;
+    } elseif (file_exists($temp_output)) {
+        if ($current_file !== $input_path) {
+            unlink($current_file);
+        }
+        $current_file = $temp_output;
+    } else {
         echo json_encode(['error' => 'Output file was not created']);
         return;
     }
-    
+
+    // Step 3: OCR if requested
+    if ($do_ocr) {
+        $ocr_script = dirname(SCRIPT_PATH) . '/additional-tools/ocr-and-index.sh';
+        if (file_exists($ocr_script)) {
+            $command = escapeshellarg($ocr_script) . ' ' . escapeshellarg($current_file) . ' --full-ocr 2>&1';
+            exec($command, $output, $return_code);
+
+            // Look for OCR output
+            $expected_ocr = str_replace('.pdf', '-OCR.pdf', $current_file);
+            if (file_exists($expected_ocr)) {
+                unlink($current_file);
+                $current_file = $expected_ocr;
+            }
+        }
+    }
+
+    // Step 4: Add page numbers if requested
+    if ($add_page_numbers) {
+        $pagenums_script = dirname(SCRIPT_PATH) . '/additional-tools/add-page-numbers.sh';
+        if (file_exists($pagenums_script)) {
+            $command = escapeshellarg($pagenums_script) . ' ' . escapeshellarg($current_file) . ' 2>&1';
+            exec($command, $output, $return_code);
+
+            // Look for numbered output
+            $expected_numbered = str_replace('.pdf', '-numbered.pdf', $current_file);
+            if (file_exists($expected_numbered)) {
+                unlink($current_file);
+                $current_file = $expected_numbered;
+            }
+        }
+    }
+
+    // Step 5: Compress if requested (should be last)
+    if ($compress) {
+        $compress_script = dirname(SCRIPT_PATH) . '/additional-tools/compress-pdf.sh';
+        if (file_exists($compress_script)) {
+            $command = escapeshellarg($compress_script) . ' ' . escapeshellarg($current_file) . ' ebook 2>&1';
+            exec($command, $output, $return_code);
+
+            // Look for compressed output
+            $expected_compressed = str_replace('.pdf', '-compressed.pdf', $current_file);
+            if (file_exists($expected_compressed)) {
+                unlink($current_file);
+                $current_file = $expected_compressed;
+            }
+        }
+    }
+
+    // Final output path
+    $output_path = UPLOAD_DIR . $upload_id . '_output_' . $filename;
+    rename($current_file, $output_path);
+
+    // Clean up input file
+    if (file_exists($input_path)) {
+        unlink($input_path);
+    }
+
     echo json_encode([
         'success' => true,
         'download_url' => '?download=1&file=' . urlencode($upload_id . '_output_' . $filename)
@@ -214,7 +328,7 @@ function handle_cleanup() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF Font Fixer</title>
+    <title>PDF Problem Solver</title>
     <style>
         * {
             margin: 0;
@@ -285,8 +399,107 @@ function handle_cleanup() {
             margin-bottom: 1rem;
         }
         
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        input[type="email"],
+        input[type="text"],
+        input[type="file"],
+        select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 1rem;
+            transition: border-color 0.3s ease;
+        }
+
+        input[type="email"]:focus,
+        input[type="text"]:focus,
+        input[type="file"]:focus,
+        select:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        select {
+            cursor: pointer;
+            background-color: white;
+        }
+
+        small {
+            font-size: 0.875rem;
+        }
+
         input[type="file"] {
-            display: none;
+            padding: 0.5rem;
+        }
+
+        .btn-submit {
+            width: 100%;
+            padding: 1rem 1.5rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .options-grid {
+            display: grid;
+            gap: 1rem;
+            margin-top: 0.5rem;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: flex-start;
+            padding: 1rem;
+            background-color: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .checkbox-label:hover {
+            background-color: #e9ecef;
+            border-color: #3498db;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            margin-right: 0.75rem;
+            margin-top: 0.25rem;
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .checkbox-label > div {
+            flex: 1;
+        }
+
+        .checkbox-label span {
+            font-weight: 600;
+            color: #2c3e50;
+            display: block;
+        }
+
+        .checkbox-label small {
+            display: block;
+            color: #7f8c8d;
+            font-size: 0.875rem;
+            margin-top: 0.25rem;
+        }
+
+        .checkbox-label input[type="checkbox"]:checked ~ div span {
+            color: #3498db;
         }
         
         .btn {
@@ -404,21 +617,92 @@ function handle_cleanup() {
 <body>
     <div class="container">
         <header>
-            <h1>PDF Font Fixer</h1>
+            <h1>PDF Problem Solver</h1>
             <p class="subtitle">Fix PDF printing problems where symbols appear instead of text</p>
         </header>
         
         <div class="upload-section">
-            <div class="upload-area" id="uploadArea">
-                <div class="upload-icon">📄</div>
-                <p><strong>Drop your PDF file here</strong></p>
-                <p>or</p>
-                <button class="btn" onclick="document.getElementById('fileInput').click()">
-                    Choose File
-                </button>
-                <input type="file" id="fileInput" accept=".pdf">
-            </div>
-            
+            <form id="uploadForm">
+                <div class="form-group">
+                    <label for="emailInput">Your Email (optional, for notification when processing is complete):</label>
+                    <input type="email" id="emailInput" name="email" placeholder="your.email@example.com">
+                </div>
+
+                <div class="form-group">
+                    <label for="fileInput">Select PDF File:</label>
+                    <input type="file" id="fileInput" name="file" accept=".pdf" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="pageSelection">Pages to Convert:</label>
+                    <select id="pageSelection" name="pages">
+                        <option value="all">Convert all pages (safest, recommended)</option>
+                        <option value="auto">Auto-detect problem pages only</option>
+                        <option value="custom">Specific pages (enter below)</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="customPagesGroup" style="display: none;">
+                    <label for="customPages">Page Numbers (comma or space separated, e.g., "1,3,5" or "1 3 5"):</label>
+                    <input type="text" id="customPages" name="custom_pages" placeholder="e.g., 1, 3, 5-10, 15">
+                </div>
+
+                <div class="form-group">
+                    <label for="dpiSelection">Image Quality (DPI):</label>
+                    <select id="dpiSelection" name="dpi">
+                        <option value="300">300 DPI (Good, faster)</option>
+                        <option value="600" selected>600 DPI (Excellent, recommended for printing)</option>
+                        <option value="1200">1200 DPI (Maximum quality, slower)</option>
+                    </select>
+                    <small style="color: #7f8c8d; display: block; margin-top: 0.5rem;">
+                        Higher DPI = better print quality but larger file size
+                    </small>
+                </div>
+
+                <div class="form-group">
+                    <label>Additional Processing Options:</label>
+                    <div class="options-grid">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="ocr" id="ocrCheck" value="1">
+                            <div>
+                                <span>Re-OCR Document</span>
+                                <small>Extract text using OCR (useful for scanned documents)</small>
+                            </div>
+                        </label>
+
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="page_numbers" id="pageNumbersCheck" value="1">
+                            <div>
+                                <span>Add Page Numbers</span>
+                                <small>Add page numbers to each page</small>
+                            </div>
+                        </label>
+
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="compress" id="compressCheck" value="1">
+                            <div>
+                                <span>Compress Output</span>
+                                <small>Reduce file size while maintaining quality</small>
+                            </div>
+                        </label>
+
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="remove_security" id="removeSecurityCheck" value="1">
+                            <div>
+                                <span>Remove Security</span>
+                                <small>Remove password protection or restrictions</small>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <button type="submit" class="btn btn-submit" id="submitBtn">
+                        Fix PDF
+                    </button>
+                </div>
+            </form>
+
             <div class="file-info" id="fileInfo">
                 <strong>Selected file:</strong> <span id="fileName"></span>
                 <br>
@@ -456,8 +740,14 @@ function handle_cleanup() {
     </div>
     
     <script>
-        const uploadArea = document.getElementById('uploadArea');
+        const uploadForm = document.getElementById('uploadForm');
         const fileInput = document.getElementById('fileInput');
+        const emailInput = document.getElementById('emailInput');
+        const pageSelection = document.getElementById('pageSelection');
+        const customPagesGroup = document.getElementById('customPagesGroup');
+        const customPages = document.getElementById('customPages');
+        const dpiSelection = document.getElementById('dpiSelection');
+        const submitBtn = document.getElementById('submitBtn');
         const fileInfo = document.getElementById('fileInfo');
         const fileName = document.getElementById('fileName');
         const fileSize = document.getElementById('fileSize');
@@ -467,34 +757,47 @@ function handle_cleanup() {
         const error = document.getElementById('error');
         const errorMessage = document.getElementById('errorMessage');
         const downloadBtn = document.getElementById('downloadBtn');
-        
+
         let currentUploadId = null;
-        
-        // Drag and drop functionality
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('drag-over');
-        });
-        
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('drag-over');
-        });
-        
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('drag-over');
-            
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                handleFile(files[0]);
+
+        // Show/hide custom pages input
+        pageSelection.addEventListener('change', (e) => {
+            if (e.target.value === 'custom') {
+                customPagesGroup.style.display = 'block';
+                customPages.required = true;
+            } else {
+                customPagesGroup.style.display = 'none';
+                customPages.required = false;
             }
         });
-        
-        // File input change
+
+        // File input change - show file info
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
-                handleFile(e.target.files[0]);
+                const file = e.target.files[0];
+                fileName.textContent = file.name;
+                fileSize.textContent = formatFileSize(file.size);
+                fileInfo.style.display = 'block';
+            } else {
+                fileInfo.style.display = 'none';
             }
+        });
+
+        // Form submission
+        uploadForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+
+            if (fileInput.files.length === 0) {
+                showError('Please select a PDF file.');
+                return;
+            }
+
+            if (pageSelection.value === 'custom' && !customPages.value.trim()) {
+                showError('Please enter page numbers or select a different option.');
+                return;
+            }
+
+            handleFile(fileInput.files[0]);
         });
         
         function formatFileSize(bytes) {
@@ -558,12 +861,20 @@ function handle_cleanup() {
         
         function processFile(uploadId, filename) {
             processingMessage.textContent = 'Processing your PDF... This may take a moment.';
-            
+
             const formData = new FormData();
             formData.append('action', 'process');
             formData.append('upload_id', uploadId);
             formData.append('filename', filename);
-            
+            formData.append('email', emailInput.value);
+            formData.append('pages', pageSelection.value);
+            formData.append('custom_pages', customPages.value);
+            formData.append('dpi', dpiSelection.value);
+            formData.append('ocr', document.getElementById('ocrCheck').checked ? '1' : '0');
+            formData.append('page_numbers', document.getElementById('pageNumbersCheck').checked ? '1' : '0');
+            formData.append('compress', document.getElementById('compressCheck').checked ? '1' : '0');
+            formData.append('remove_security', document.getElementById('removeSecurityCheck').checked ? '1' : '0');
+
             fetch('index.php', {
                 method: 'POST',
                 body: formData

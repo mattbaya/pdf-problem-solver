@@ -6,6 +6,9 @@
 
 set -e
 
+# Default DPI setting (can be overridden)
+DPI=600
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -25,10 +28,17 @@ show_help() {
     echo "  $0                    # Interactive mode (recommended)"
     echo "  $0 --help           # Show this help"
     echo "  $0 file.pdf         # Quick mode with specific file"
+    echo "  $0 file.pdf --dpi 600 --pages all  # Advanced options"
+    echo
+    echo -e "${CYAN}OPTIONS:${NC}"
+    echo "  --dpi N             # Set DPI (300, 600, 1200) - default: 600"
+    echo "  --pages all         # Convert all pages (safest)"
+    echo "  --pages auto        # Auto-detect problem pages"
+    echo "  --pages \"1 2 5\"     # Specific page numbers"
     echo
     echo -e "${CYAN}WHAT IT DOES:${NC}"
     echo "• Scans PDF files for fonts with custom encodings that cause print problems"
-    echo "• Converts problematic pages to high-resolution images (300 DPI)"
+    echo "• Converts problematic pages to high-resolution images (default 600 DPI)"
     echo "• Rebuilds the PDF with image-based pages that print correctly"
     echo "• Preserves the original file for digital use"
     echo
@@ -476,8 +486,8 @@ fix_pdf_pages() {
     echo "  Processing page ranges: $ranges"
     
     for page in ${pages_array[@]}; do
-        echo -n "  Converting page $page... "
-        pdftoppm -f $page -l $page -png -r 300 "$input_pdf" "$temp_dir/page_images/page" 2>/dev/null
+        echo -n "  Converting page $page at ${DPI} DPI... "
+        pdftoppm -f $page -l $page -png -r $DPI "$input_pdf" "$temp_dir/page_images/page" 2>/dev/null
         echo "done"
     done
     
@@ -504,7 +514,8 @@ fix_pdf_pages() {
         
         # Convert the problem page image back to PDF
         echo "  Converting page $problem_page image to PDF..."
-        local page_img=$(printf "$temp_dir/page_images/page-%03d.png" $problem_page)
+        # pdftoppm creates files like page-1.png, page-2.png (not zero-padded)
+        local page_img="$temp_dir/page_images/page-$problem_page.png"
         if [ -f "$page_img" ]; then
             magick "$page_img" "$temp_dir/fixed_page_$problem_page.pdf"
             pdf_parts+=("$temp_dir/fixed_page_$problem_page.pdf")
@@ -535,51 +546,104 @@ main() {
     if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
         show_help
     fi
-    
+
+    # Parse command line arguments
+    local input_pdf=""
+    local pages_mode=""
+    local specified_pages=""
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --dpi)
+                DPI="$2"
+                if [[ ! "$DPI" =~ ^[0-9]+$ ]]; then
+                    print_error "Invalid DPI value: $DPI"
+                    exit 1
+                fi
+                shift 2
+                ;;
+            --pages)
+                pages_mode="$2"
+                if [[ "$pages_mode" != "all" && "$pages_mode" != "auto" ]]; then
+                    # Treat as custom page list
+                    specified_pages="$2"
+                    pages_mode="custom"
+                fi
+                shift 2
+                ;;
+            *.pdf)
+                input_pdf="$1"
+                shift
+                ;;
+            *)
+                print_error "Unknown argument: $1"
+                exit 1
+                ;;
+        esac
+    done
+
     print_header
     
     # Check dependencies
     check_dependencies
-    
+
     # Select PDF file
     print_info "Step 1: Select PDF file"
-    local input_pdf=""
-    
-    # If a PDF file was provided as argument, use it
-    if [ $# -eq 1 ] && [ -f "$1" ] && [[ "$1" =~ \.pdf$ ]]; then
-        input_pdf="$1"
-        print_info "Using provided file: $(basename "$input_pdf")"
-    else
-        if [ $# -eq 1 ] && [ ! -f "$1" ]; then
-            print_error "File not found: $1"
-            exit 1
-        elif [ $# -eq 1 ] && [[ ! "$1" =~ \.pdf$ ]]; then
-            print_error "File is not a PDF: $1"
-            exit 1
-        fi
-        
-        # Interactive file selection
+
+    # If no PDF file provided, ask interactively
+    if [ -z "$input_pdf" ]; then
         input_pdf=$(select_pdf_file)
         if [ $? -ne 0 ]; then
             exit 1
         fi
+    elif [ ! -f "$input_pdf" ]; then
+        print_error "File not found: $input_pdf"
+        exit 1
     fi
     
     print_success "Selected: $(basename "$input_pdf")"
     echo
-    
-    # Ask about problem detection
-    print_info "Step 2: Identify problematic pages"
-    echo "How would you like to identify problem pages?"
-    echo "1) Let me scan the entire PDF for font problems (recommended)"
-    echo "2) I know the specific page numbers with problems"
+    print_info "DPI setting: ${DPI}"
     echo
-    read -p "Enter choice (1-2): " detection_choice
-    
+
+    # Ask about problem detection if not specified
+    print_info "Step 2: Identify problematic pages"
+
     local problem_pages=""
-    
-    case $detection_choice in
-        1)
+    local total_pages=$(pdfinfo "$input_pdf" | grep "Pages:" | awk '{print $2}')
+
+    if [ -z "$pages_mode" ]; then
+        echo "How would you like to identify problem pages?"
+        echo "1) Convert all pages (safest, recommended)"
+        echo "2) Let me scan the PDF for font problems (auto-detect)"
+        echo "3) I know the specific page numbers with problems"
+        echo
+        read -p "Enter choice (1-3): " detection_choice
+
+        case $detection_choice in
+            1)
+                pages_mode="all"
+                ;;
+            2)
+                pages_mode="auto"
+                ;;
+            3)
+                pages_mode="custom"
+                ;;
+            *)
+                print_error "Invalid choice"
+                exit 1
+                ;;
+        esac
+    fi
+
+    case $pages_mode in
+        all)
+            echo
+            print_info "Converting all $total_pages pages to images"
+            problem_pages=$(seq 1 $total_pages | tr '\n' ' ')
+            ;;
+        auto)
             echo
             local scan_result=$(scan_pdf_fonts "$input_pdf")
             if [ $? -eq 1 ]; then
@@ -588,17 +652,17 @@ main() {
             fi
             problem_pages="$scan_result"
             ;;
-        2)
-            echo
-            read -p "Enter problematic page numbers (space-separated, e.g., '231 233 245'): " problem_pages
-            if [ -z "$problem_pages" ]; then
-                print_error "No page numbers provided"
-                exit 1
+        custom)
+            if [ -n "$specified_pages" ]; then
+                problem_pages="$specified_pages"
+            else
+                echo
+                read -p "Enter page numbers (space-separated, e.g., '1 3 5'): " problem_pages
+                if [ -z "$problem_pages" ]; then
+                    print_error "No page numbers provided"
+                    exit 1
+                fi
             fi
-            ;;
-        *)
-            print_error "Invalid choice"
-            exit 1
             ;;
     esac
     

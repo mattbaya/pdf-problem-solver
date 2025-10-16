@@ -523,11 +523,15 @@
             })
             .then(response => response.json())
             .then(data => {
-                processing.style.display = 'none';
-                
-                if (data.success) {
+                if (data.success && data.job_id) {
+                    // Start polling for status
+                    pollJobStatus(data.job_id, data.filename);
+                } else if (data.success) {
+                    // Immediate success (shouldn't happen with async backend)
+                    processing.style.display = 'none';
                     showSuccess(data.download_id, data.filename);
                 } else {
+                    processing.style.display = 'none';
                     showError(data.error || 'An error occurred while processing the file.');
                 }
             })
@@ -536,21 +540,43 @@
                 showError('An error occurred while uploading the file.');
             });
         }
-        
+
+        function pollJobStatus(jobId, filename) {
+            const statusInterval = setInterval(() => {
+                fetch(`/status/${jobId}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'completed') {
+                            clearInterval(statusInterval);
+                            processing.style.display = 'none';
+                            showSuccess(jobId, filename);
+                        } else if (data.status === 'failed') {
+                            clearInterval(statusInterval);
+                            processing.style.display = 'none';
+                            showError(data.error || 'Processing failed.');
+                        } else {
+                            // Update progress message if available
+                            const progressEl = document.querySelector('.processing p');
+                            if (progressEl && data.progress) {
+                                progressEl.textContent = data.progress;
+                            }
+                        }
+                    })
+                    .catch(err => {
+                        clearInterval(statusInterval);
+                        processing.style.display = 'none';
+                        showError('Lost connection to server.');
+                    });
+            }, 2000); // Poll every 2 seconds
+        }
+
         function showSuccess(downloadId, filename) {
             result.style.display = 'block';
-            downloadBtn.href = `/download/${downloadId}/${filename}`;
+            downloadBtn.href = `/download/${downloadId}`;
+            downloadBtn.download = filename;
             downloadBtn.onclick = () => {
-                // Clean up files after download
-                setTimeout(() => {
-                    fetch('/cleanup', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ download_id: downloadId })
-                    });
-                }, 1000);
+                // Note: Cleanup handled by backend after timeout
+                return true;
             };
         }
         
