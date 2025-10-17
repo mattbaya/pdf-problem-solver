@@ -199,7 +199,7 @@ function handle_process() {
     $temp_output = UPLOAD_DIR . $upload_id . '_temp_fixed.pdf';
     $command = sprintf(
         'echo -e "y\n%s\ny\n" | %s 2>&1',
-        escapeshellarg($temp_output),
+        $temp_output,  // Don't escapeshellarg here - it's already in quotes
         $command
     );
 
